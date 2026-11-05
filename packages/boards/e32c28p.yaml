@@ -1,0 +1,79 @@
+# packages/boards/e32c28p.yaml
+substitutions:
+  # Display-Auflösung und Rotation
+  display_width: "320"
+  display_height: "240"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Einbindung der Kernkomponenten von Tessera
+dashboard_import:
+  package_import_url: !include ../core.yaml
+
+# --- DISPLAY & TOUCH CONFIGURATION (ILI9341 & FT6336G) ---
+# Passe diese SPI/I2C Pins gemäß dem E32C28P Datenblatt an
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+
+i2c:
+  sda: GPIO15
+  scl: GPIO16
+
+display:
+  - platform: ili9341
+    id: my_display
+    # ... Restliche Display-Standard-Konfiguration von Tessera kopieren
+
+touchscreen:
+  - platform: ft63x6
+    id: my_touch
+    interrupt_pin: GPIO17
+    # ... Restliche Touch-Konfiguration von Tessera
+
+# --- VOICE ASSISTANT HARDWARE (I2S Audio) ---
+# Das E32C28P nutzt I2S für das Mikrofon (INMP441 o.ä.) und den Lautsprecher-Ausgang (MAX98357 o.ä.)
+i2s_audio:
+  - id: i2s_bus_in
+    i2s_lrclk_pin: GPIO41
+    i2s_bclk_pin: GPIO42
+    # Hier den Daten-Pin des Mikrofons eintragen
+    i2s_din_pin: GPIO45 
+
+  - id: i2s_bus_out
+    i2s_lrclk_pin: GPIO41  # Teilt sich oft LRCLK/BCLK
+    i2s_bclk_pin: GPIO42
+    # Hier den Daten-Pin des Lautsprechers eintragen
+    i2s_dout_pin: GPIO46 
+
+microphone:
+  - platform: i2s_audio
+    id: board_mic
+    i2s_audio_id: i2s_bus_in
+    adc_type: external
+    pdm: false
+
+speaker:
+  - platform: i2s_audio
+    id: board_speaker
+    i2s_audio_id: i2s_bus_out
+    dac_type: external
+
+# --- HOME ASSISTANT VOICE ASSISTANT PIPELINE ---
+voice_assistant:
+  id: va
+  microphone: board_mic
+  speaker: board_speaker
+  model: "none" # Nutzt die Home Assistant Pipeline auf dem Server
+  use_wake_word: true
+  on_listening:
+    - logger.log: "Voice Assistant hört zu..."
+    # Optional: Hier visuelles Feedback auf dem Tessera-Display auslösen
