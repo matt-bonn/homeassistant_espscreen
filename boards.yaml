@@ -30,6 +30,10 @@ cyd:
   choices:
     # Some of these boards carry an ST7789V display controller instead of the ILI9341 (GitHub #6).
     DISPLAY_MODEL: [ILI9341, ST7789V]
+    
+e32c28p:
+  name: 2.8 Inch ESP32-S3 Display (E32C28P)"
+  status: experimental
 
 cyd9342:
   file: cyd-2432s028-ili9342.yaml
