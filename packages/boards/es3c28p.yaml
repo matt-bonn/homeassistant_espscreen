@@ -66,6 +66,12 @@ i2c:
     scl: GPIO16
     scan: true
     frequency: 400kHz
+    
+# PWM-Ausgang für die Hintergrundbeleuchtung (wird von features/backlight.yaml benötigt)
+output:
+  - platform: ledc
+    pin: GPIO45
+    id: gpio_backlight_pwm
 
 # Verstaerker-Enable fuer ES3C28P (FM8002E ist Active-LOW -> inverted: true!)
 switch:
