@@ -21,7 +21,7 @@ substitutions:
   PANEL_W: "240"
   PANEL_H: "320"
   DISPLAY_DPI: "105"
-  ROTATION_LANDSCAPE: "90"
+  ROTATION_LANDSCAPE: "270"
 
   # Raster fuer 2.8 Zoll (Hochkant 2x3, Querformat 3x2)
   GRID_COLS: "5"
