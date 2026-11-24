@@ -1,0 +1,152 @@
+# Tessera / ESP Screens - LCDWIKI ES3C28P: a 2.8-inch 240x320 IPS panel (ILI9341V) with FT6336G
+# capacitive touch, ES8311 audio codec, MEMS microphone and LiPo battery monitor on an ESP32-S3.
+
+packages:
+  hardware: !include ../hardware/esp32s3-rgb.yaml
+  look: !include ../looks/standard.yaml
+  touch: !include ../features/capacitive-touch.yaml
+  backlight: !include ../features/backlight.yaml
+  self_test: !include ../features/self-test.yaml
+  snapshot: !include ../features/snapshot.yaml
+  # Erzeugt automatisch ts_microphone und ts_speaker_out ueber ES8311 (ohne AEC):
+  voice: !include ../hardware/parts/es8311-voice.yaml
+
+substitutions:
+  BOARD_ID: "es3c28p"
+  DEVICE_NAME: "es3c28p-remote"
+  DEVICE_FRIENDLY_NAME: "ES3C28P Fernbedienung"
+
+  # Panel: 2.8 Zoll 240x320 (~142.86 DPI)
+  PANEL_W: "240"
+  PANEL_H: "320"
+  DISPLAY_DPI: "142.857"
+  ROTATION_LANDSCAPE: "90"
+
+  # Raster fuer 2.8 Zoll (Hochkant 2x3, Querformat 3x2)
+  GRID_COLS: "3"
+  GRID_ROWS: "2"
+  GRID_COLS_PORTRAIT: "2"
+  GRID_ROWS_PORTRAIT: "3"
+
+  SCREEN_MAX_TILES: "64"
+  SCREEN_MAX_PAGES: "8"
+  SCREEN_MAX_BAR_ITEMS: "6"
+  LVGL_BUFFER_SIZE: "25%"
+
+  # Backlight Pin (PWM)
+  BACKLIGHT_PIN: GPIO45
+
+  # I2S & ES8311 Audio Pins (direkter I2S-Transport ohne AEC)
+  AUDIO_I2C: touch_bus
+  AUDIO_MCLK_PIN: GPIO6
+  AUDIO_BCLK_PIN: GPIO4
+  AUDIO_LRCLK_PIN: GPIO5
+  AUDIO_DOUT_PIN: GPIO8
+  AUDIO_DIN_PIN: GPIO7
+  AUDIO_TRANSPORT: "i2s"
+
+# ============================================================
+# Hardware-spezifische Komponenten
+# ============================================================
+
+esphome:
+  min_version: 2026.9.0
+
+esp32:
+  flash_size: 16MB
+
+# Stromsparmodus fuer Akkubetrieb
+wifi:
+  power_save_mode: light
+
+# Geteilter I2C Bus fuer Touch (FT6336G, 0x38) & Audio-Codec (ES8311, 0x18)
+i2c:
+  - id: touch_bus
+    sda: GPIO15
+    scl: GPIO16
+    scan: true
+    frequency: 400kHz
+
+# Verstaerker-Enable fuer ES3C28P (FM8002E ist Active-LOW -> inverted: true!)
+switch:
+  - platform: gpio
+    id: board_speaker_amp
+    internal: true
+    pin:
+      number: GPIO1
+      inverted: true
+    restore_mode: ALWAYS_ON
+
+# SPI Bus fuer das 2.8" ILI9341V Display
+spi:
+  - id: lcd_spi
+    clk_pin: GPIO12
+    mosi_pin: GPIO11
+    miso_pin: GPIO13
+
+# Display (ID muss "my_display" sein)
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: ILI9341
+    spi_id: lcd_spi
+    cs_pin: GPIO10
+    dc_pin: GPIO46
+    data_rate: 40MHz
+    invert_colors: false
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: 240
+      height: 320
+
+# Touchscreen (ID muss "ts_touch" sein)
+touchscreen:
+  - platform: ft63x6
+    id: ts_touch
+    i2c_id: touch_bus
+    address: 0x38
+    interrupt_pin: GPIO17
+    reset_pin: GPIO18
+    display: my_display
+    update_interval: 20ms
+
+# Status-LED (WS2812 RGB auf GPIO42)
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO42
+    num_leds: 1
+    chipset: ws2812
+    name: "Status LED"
+    id: status_led
+
+# Akku-Ueberwachung (GPIO9)
+sensor:
+  - platform: adc
+    pin: GPIO9
+    name: "Battery Voltage"
+    device_class: "voltage"
+    id: bat_pack
+    entity_category: "diagnostic"
+    accuracy_decimals: 3
+    update_interval: 10s
+    attenuation: 12dB
+    samples: 20
+    filters:
+      - multiply: 2.0
+
+  - platform: copy
+    source_id: bat_pack
+    name: "Battery Level"
+    id: battery_level
+    device_class: "battery"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    filters:
+      - calibrate_linear:
+          - 3.20 -> 0.0
+          - 4.20 -> 100.0
+      - clamp:
+          min_value: 0
+          max_value: 100
