@@ -17,21 +17,21 @@ substitutions:
   DEVICE_NAME: "es3c28p-remote"
   DEVICE_FRIENDLY_NAME: "ES3C28P Fernbedienung"
 
-  # Panel: 2.8 Zoll 240x320 (~142.86 DPI)
+  # Panel: 2.8 Zoll 240x320 (~105 DPI)
   PANEL_W: "240"
   PANEL_H: "320"
-  DISPLAY_DPI: "142.857"
+  DISPLAY_DPI: "105"
   ROTATION_LANDSCAPE: "90"
 
   # Raster fuer 2.8 Zoll (Hochkant 2x3, Querformat 3x2)
-  GRID_COLS: "3"
+  GRID_COLS: "5"
   GRID_ROWS: "2"
-  GRID_COLS_PORTRAIT: "2"
+  GRID_COLS_PORTRAIT: "3"
   GRID_ROWS_PORTRAIT: "3"
 
-  SCREEN_MAX_TILES: "64"
-  SCREEN_MAX_PAGES: "8"
-  SCREEN_MAX_BAR_ITEMS: "6"
+  SCREEN_MAX_TILES: "96"
+  SCREEN_MAX_PAGES: "12"
+  SCREEN_MAX_BAR_ITEMS: "3"
   LVGL_BUFFER_SIZE: "25%"
 
   # Backlight Pin (PWM)
