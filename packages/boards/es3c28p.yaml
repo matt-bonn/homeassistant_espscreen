@@ -8,7 +8,7 @@ packages:
   backlight: !include ../features/backlight.yaml
   self_test: !include ../features/self-test.yaml
   snapshot: !include ../features/snapshot.yaml
-  pictures: !include ../features/picture-fetch.yaml
+  camera: !include ../features/camera.yaml
   # Erzeugt automatisch ts_microphone und ts_speaker_out ueber ES8311 (ohne AEC):
   voice: !include ../hardware/parts/es8311-voice.yaml
 
