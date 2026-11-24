@@ -152,6 +152,20 @@ describe("one draft in both editor modes", () => {
     addTile('sensor.overflow');
     expect(JSON.stringify(doc.document)).toBe(before);
   });
+  it('offers a new page for a tile the selected page has no room for, and puts it there on a yes', async () => {
+    doc.selectedPageId = doc.document!.pages[1].id;
+    for (let i = 0; i < 6; i++) await addTile(`light.filling_${i}`);
+    const pages = doc.document!.pages.length;
+    await addTile('light.overflow');
+    const notice = useUiStore().notice!;
+    expect(notice.message).toBe('This page is full. Select an empty cell on another page.');
+    expect(notice.action?.label).toBe('On a new page');
+    expect(doc.document!.pages).toHaveLength(pages);
+    notice.action!.run();
+    await vi.waitFor(() => expect(doc.document!.pages).toHaveLength(pages + 1));
+    await vi.waitFor(() => expect(doc.document!.pages.at(-1)!.tiles.map((tile) => tile.content)).toEqual([{ kind: 'entity', entityId: 'light.overflow' }]));
+    expect(doc.selectedPageId).toBe(doc.document!.pages.at(-1)!.id);
+  });
   it('uses a page picker and named routes at phone widths without shrinking the map', async () => {
     setMedia('(max-width: 700px)', true);
     const view = mount(LayoutView);
@@ -474,6 +488,23 @@ describe("revisions and portable layouts", () => {
     expect(doc.layoutJson()).not.toContain("private-key-never-export");
     expect(doc.document!.pages[0].id).not.toBe(source.layout.pages[0].id);
     expect(doc.document!.pages[0].tiles[0].content).toEqual({ kind: "navigation", target: { kind: "page", pageId: doc.document!.pages[1].id } });
+  });
+  it("holds a layout copied to a screen whose board draws no sections to its tiles alone", () => {
+    const screens = useInventoryStore().inventory.screens;
+    screens.push(screenFixture({ ...screens[0], id: "source", name: "Source" }));
+    const source = screens[1].page_document as PageDocument, first = source.layout.pages[0];
+    const block = { ...first.tiles[0].placement };
+    first.sections = [{ id: "5ec7000000000001", title: "Lights", placement: block }];
+    // This screen's board draws none (no `sections` in what the add-on says of it): the tiles come, the section does not.
+    expect(useScreenStore().currentScreen?.sections).not.toBe(true);
+    doc.copyLayoutFrom("source");
+    expect(doc.document!.pages.some((page) => page.sections)).toBe(false);
+    expect(doc.document!.pages[0].tiles.length).toBe(first.tiles.length);
+    expect(doc.layout!.sections).toBeUndefined();
+    // On a screen that draws them the same copy keeps its section.
+    (useScreenStore().currentScreen as any).sections = true;
+    doc.copyLayoutFrom("source");
+    expect(doc.document!.pages[0].sections?.map((section) => section.title)).toEqual(["Lights"]);
   });
   it("does not apply an import response to a different screen opened while it was checked", async () => {
     let resolve!: (value: Response) => void;

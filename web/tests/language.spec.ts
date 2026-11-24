@@ -10,6 +10,7 @@ import { loadLanguage } from "../src/i18n";
 import type { Languages } from "../src/types";
 import { useUiStore } from "../src/stores/ui";
 import { useInventoryStore } from "../src/stores/inventory";
+import { router } from "../src/router";
 
 const GUIDE = "https://github.com/MaxGramser/homeassistant_espscreen/blob/main/docs/TRANSLATING.md";
 function language(extra: Partial<Languages> = {}): Languages {
@@ -39,7 +40,9 @@ const options = (view: ReturnType<typeof mount>, id: string) => view.findAll(`#$
 
 // The screens' language here is Dutch: its own number marks come with its file.
 beforeAll(() => loadLanguage("nl"));
-beforeEach(() => {
+beforeEach(async () => {
+  // Language & region is a part of Settings of its own (#/settings/language).
+  await router.push("/settings/language");
   vi.unstubAllGlobals();
   useInventoryStore().inventory = { screens: [], entities: [], updates: { target: "0.2.80", pending: 0 }, language: language() } as any;
 });
@@ -51,7 +54,8 @@ describe("the Language & region card", () => {
   });
   it("offers Home Assistant's language by its own name, every language, and marks the unchecked ones", () => {
     const view = mount(AppSettingsView);
-    expect(view.find("#language h2").text()).toBe("Language & region");
+    // The part's page carries the title; the card under it has no heading of its own.
+    expect(view.find("h1").text()).toBe("Language & region");
     expect(options(view, "screen-language")).toEqual([
       "Home Assistant's language (Nederlands)", "English (US)", "English (UK)", "Nederlands", "Deutsch · not checked yet, help welcome",
     ]);
@@ -153,5 +157,6 @@ describe("the top bar's clock", () => {
     useInventoryStore().inventory.language = language({ clock_effective: "12" });
     drawer = mount(TopbarInspector, { props: { index: 0 } });
     expect(drawer.find("#topbar-clock").text()).toBe("12 hour clock · change under Settings → Language & region");
+    expect(drawer.find("#topbar-clock a").attributes("href")).toBe("#settings");
   });
 });

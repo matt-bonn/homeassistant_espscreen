@@ -35,7 +35,6 @@
 
 namespace picture_fetch {
 static const char *const TAG = "picture";
-constexpr uint32_t CONNECT_MS = 4000;   // as ESPHome's http_request timeout was
 constexpr uint32_t RECV_MS = 4000;      // a chunk that does not come in this long ends the download
 constexpr uint32_t WHOLE_MS = 30000;    // and a picture that takes longer than this altogether
 constexpr size_t CHUNK = 8192;          // what one recv takes at most
@@ -67,6 +66,8 @@ struct Slot {
   bool free_after = false;        // released while loading: the picture goes once the task has ended
   bool has_pending = false;       // a load asked for while one ran: it follows
   std::string pending;
+  std::string pending_etag;        // the ETag it was asked with (load with an ETag)
+  bool pending_has_etag = false;
   // What the task was given, and what it gives back (written before `state` becomes DONE).
   std::string task_url, task_etag;
   uint32_t started = 0;
@@ -89,46 +90,6 @@ Slot &live() { return slots[2]; }
 // Pixels and the read buffer take PSRAM first (roomy.h): only this file's code reads them, never a DMA.
 
 // ---- the task ----
-int connect_to(const Address &a, uint32_t wait_ms) {
-  addrinfo hints{};
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_STREAM;
-  addrinfo *found = nullptr;
-  const std::string port = std::to_string(a.port);
-  if (getaddrinfo(a.host.c_str(), port.c_str(), &hints, &found) != 0 || !found) return -1;
-  int fd = socket(found->ai_family, found->ai_socktype, found->ai_protocol);
-  if (fd < 0) { freeaddrinfo(found); return -1; }
-  const int flags = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-  int r = connect(fd, found->ai_addr, found->ai_addrlen);
-  freeaddrinfo(found);
-  if (r < 0 && errno != EINPROGRESS) { close(fd); return -1; }
-  if (r < 0) {
-    fd_set writable;
-    FD_ZERO(&writable);
-    FD_SET(fd, &writable);
-    timeval wait{static_cast<time_t>(CONNECT_MS / 1000), static_cast<suseconds_t>((CONNECT_MS % 1000) * 1000)};
-    if (select(fd + 1, nullptr, &writable, nullptr, &wait) <= 0) { close(fd); return -1; }
-    int error = 0;
-    socklen_t len = sizeof(error);
-    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) { close(fd); return -1; }
-  }
-  fcntl(fd, F_SETFL, flags);
-  timeval chunk{static_cast<time_t>(wait_ms / 1000), static_cast<suseconds_t>((wait_ms % 1000) * 1000)};
-  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &chunk, sizeof(chunk));
-  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &chunk, sizeof(chunk));
-  return fd;
-}
-bool send_all(int fd, const std::string &text) {
-  size_t sent = 0;
-  while (sent < text.size()) {
-    const auto n = send(fd, text.data() + sent, text.size() - sent, 0);
-    if (n <= 0) return false;
-    sent += static_cast<size_t>(n);
-  }
-  return true;
-}
-
 // The whole download; `slot.ok`/`slot.cached` tell how it went.
 static void download(Slot &slot) {
   const Address a = split(slot.task_url);
@@ -307,18 +268,26 @@ static void start(Slot &slot) {
 void bind(Slot &slot, Done done) { slot.done = std::move(done); }
 bool loading(const Slot &slot) { return slot.state.load(std::memory_order_acquire) != IDLE; }
 
-void load(Slot &slot, const std::string &url) {
+static void load_with(Slot &slot, const std::string &url, const std::string *etag) {
   if (slot.state.load(std::memory_order_acquire) != IDLE) {
     // One at a time: this one follows the one on its way (a cancelled one ends at its next chunk).
     slot.pending = url;
     slot.has_pending = true;
+    slot.pending_has_etag = etag != nullptr;
+    slot.pending_etag = etag ? *etag : std::string();
     return;
   }
-  if (url != slot.url) { slot.url = url; slot.etag.clear(); }  // a new link: the ETag was the old one's
+  // A new link: the ETag was the old one's, unless the owner names the one of a picture it has.
+  if (url != slot.url) { slot.url = url; slot.etag = etag ? *etag : std::string(); }
+  else if (etag && !etag->empty()) slot.etag = *etag;
   if (picture_engine::JPEG) picture_engine::ready();  // the decoder for a JPEG, made on the main loop
   ESP_LOGD(TAG, "%s: loading %s", slot.name, url.c_str());
   start(slot);
 }
+
+void load(Slot &slot, const std::string &url) { load_with(slot, url, nullptr); }
+void load(Slot &slot, const std::string &url, const std::string &etag) { load_with(slot, url, &etag); }
+std::string etag(const Slot &slot) { return slot.etag; }
 
 static void forget_picture(Slot &slot) {
   if (slot.pixels) roomy::release(slot.pixels);
@@ -397,7 +366,7 @@ static void take_over(Slot &slot) {
   }
   if (slot.has_pending && slot.state.load() == IDLE) {
     slot.has_pending = false;
-    load(slot, slot.pending);
+    load_with(slot, slot.pending, slot.pending_has_etag ? &slot.pending_etag : nullptr);
   }
 }
 

@@ -29,6 +29,7 @@ changes them with the entity's own action, and leaves them out of the layout mes
 | Also on standby | `switch.<screen>_back_to_page_1_on_standby` | `home_on_standby` |
 | Swipe between pages | `switch.<screen>_swipe_between_pages` | `swipe_pages` |
 | Page buttons (0.2.69+) | `switch.<screen>_page_buttons` | `page_buttons` |
+| Loop pages | `switch.<screen>_loop_pages` | `loop_pages` (on by default: past the last page comes the first, by swipe and by the bar) |
 | Show home button (0.2.100+) | `switch.<screen>_show_home_button` | `home_button` |
 | Rotation | `select.<screen>_rotation` | `rotation` (0.2.80+ on every board: a half turn on any glass, the quarter turns as well on a square one; standing up or lying down on other glass is the editor's Grid button, firmware 0.53.0+, because it changes the grid) |
 | Debug mode (This screen) | `switch.<screen>_debug_mode`, a diagnostic entity | none: the screen and Home Assistant only, and the troubleshooting report, which turns it on for its own read of the log |
@@ -41,6 +42,21 @@ default because writing log lines costs the glass: on a Guition 10.1 every line 
 subscriber over Wi-Fi, came with a flash on the live camera tiles, and with the log silent there were none
 (docs/PLATFORM_PLAN.md 4.7). Turn it on to read a screen's log in ESPHome or Home Assistant; the troubleshooting
 report turns it on for its own 45 seconds and back to what it was (`reports.screen_log`, `debug=True`).
+
+**The measuring sensors** follow Debug mode in Home Assistant. A screen measures itself: Heap Free, Heap Fragmentation,
+Heap Largest Block, Heap Minimum Free, Psram Free, Psram Largest Block and Loop Stack Free on every board, Wi-Fi
+co-processor, Panel watch and Panel misses on an ESP32-P4, Pressure on a board with a camera and Echo cancellation
+status on one that cancels echo. They are for a diagnosis, so the firmware marks them `disabled_by_default`: Home
+Assistant has them switched off and records nothing of them, and anyone can switch one on under the screen's device.
+Once a screen's Debug mode has been on for a minute and a half, the app switches on the diagnostic entities of that
+screen that Home Assistant holds switched off, and it switches the same ones off again when Debug mode goes off
+(`screen_manager/app/debug_sensors.py`, `tests/test_debug_sensors.py`). It undoes only its own work: a sensor someone
+switched on stays on, one someone switched off stays off, and a screen that had them on before this firmware keeps them
+on, because Home Assistant reads the mark only when it first meets an entity. Switching an entity on makes Home
+Assistant load the screen's integration again half a minute later, so the screen's link drops for a moment then. The
+troubleshooting report needs none of this: it reads the figures from the screen itself. A new sensor that measures the
+firmware gets the mark, right under its `name:`; what the app reads through Home Assistant (Screen firmware, Screen
+board, the settings) never does, and the test says so.
 
 A screen starts with each setting's default until it stores a value of its own. Swipe between pages is the one whose
 default depends on the screen: off in the firmware and in `SETTING_RULES`, because every screen set up before had it off
@@ -88,13 +104,14 @@ The page is a menu of groups, each of which opens a page of its own:
 |---|---|
 | Brightness | Brightness (dimmable backlight), Dark mode, Auto standby, Standby after, Standby brightness or Screen on in standby (boards that can go dark) |
 | Night (boards that can go dark) | Night mode, Starts, Ends, Night brightness or Screen on at night |
-| Screen | Back to Home, After, Also on standby (boards that can go dark), Swipe between pages, Page buttons, Show home button, Rotation |
+| Screen | Back to Home, After, Also on standby (boards that can go dark), Swipe between pages, Page buttons, Loop pages, Show home button, Rotation |
 | This screen | Screen, Address, Wi-Fi (network and signal), Firmware, Home Assistant, Tessera, Debug mode, Calibrate touch (a resistive panel that has a wizard), Restart; the rows say their values again every two seconds while the page is open |
 
 Every change is stored on the screen, applied at once and published on its entity, so Home Assistant and
-Tessera show it within a second. The editor's **Screen settings** panel has the first three groups as
-cards with the same rows: a switch for a toggle, `-` and `+` that repeat while held, chips for the
-rotation. A screen whose device has a Calibrate touch button also gets a This screen card with that button.
+Tessera show it within a second. The editor's **Screen settings** tab has the same rows, grouped by what a person looks
+for instead of as on the screen (docs/PAGES.md, "Settings"): Display, Standby & night and Navigation, each a part of
+its own, with a switch for a toggle, `-` and `+` that repeat while held, chips for the rotation. A screen whose device
+has a Calibrate touch button also gets that button under This board.
 The 12 or 24-hour clock is not on this panel: it is Settings → Language & region, for every screen. A change there applies at once, without Save. An offline screen shows its values as
 unknown and takes no changes until it is back.
 
@@ -125,7 +142,7 @@ settings, so a new setting never travels in the layout message.
 - Anything new is a plain value in `settings_screen.h` next to `swipe_pages`, `rotation` and `auto_home`,
   with a preference record of its own: load it in `runtime_tiles::load_settings()` and write it in
   `persist_settings()`.
-- Every preference key in use stays what it is: `0x53435231` the frozen block, and one key each for swipe,
+- Every preference key in use stays what it is: `0x53435231` the frozen block, and one key each for swipe, loop pages (`0x4C4F5031`), Back to Home
   Back to Home (`HomeTimeout`, two uint32), dark mode, page buttons, the home button (`0x48425431`, firmware 0.60.0:
   before it the button was back after every restart, GitHub #319), number format, rotation and the alarm lock
   (`runtime_tiles.h`), and the CYD's calibration (`0x43594403`, `cyd_calibration.h`). Never reuse, renumber or
@@ -168,7 +185,7 @@ it presses the screen's own entity for it: `Calibrate touch` is a button on the 
 there is also how the app knows this screen has a wizard at all (`core.calibrate_entity`).
 
 Watch the count: a group of more than five rows gets a pager on a 320x240 board. Six is the maximum
-that still fits a 480x480 board in one go. The Screen group already has seven rows.
+that still fits a 480x480 board in one go. The Screen group already has eight rows.
 
 ### 3. The entity
 
@@ -205,8 +222,9 @@ by a board fact rather than written into one board file: `shown` on the row, and
   entity for it. Leave it out for a screen that does not own its settings too (`owner` `'layout'`), as
   `dark_mode` and `page_buttons` are: such firmware cannot have it.
 - `web/src/model/settings.ts`: one row in `SETTING_GROUPS`; its label is `editor.screen_settings.rows.<key>` in
-  `screen_manager/translations/en.json`, in the words the screen uses; then build the editor
-  (`cd web && npm test && npm run build`, AGENTS.md).
+  `screen_manager/translations/en.json`, in the words the screen uses. The key also goes in the part of the editor's
+  Settings tab that shows it, `SCREEN_PART_ROWS` in `web/src/model/settings-parts.ts` (`web/tests/settings-parts.spec.ts`
+  fails on a key no part shows); then build the editor (`cd web && npm test && npm run build`, AGENTS.md).
 - `screen_manager/app/claude_skill.py`: a row in the table of screen entities.
 - `screen_manager/app/core.py`: a `<KEY>_MIN_FIRMWARE` constant with the first firmware that has the setting, such
   as `HOME_BUTTON_MIN_FIRMWARE = '0.2.100'`. The skill's row prints it ("Firmware X or newer"), and the tests hold it
@@ -221,9 +239,13 @@ by a board fact rather than written into one board file: `shown` on the row, and
 
 - `tests/test_settings_screen.cpp` (`clang++ -std=c++17 -Wall -Wextra -Werror -I.`) walks every page and
   every row, and checks `set()`: add the key to its table of clamps.
-- `tests/test_screen_owned_settings.py` checks the entities in both profiles, `SETTING_ENTITIES`, the editor
-  rows (labels, steps and the duration ladder against `settings_screen.h`) and the add-on's calls;
-  `tests/test_settings_view.py` and `tests/test_layout.py` cover the rest of the add-on side.
+- `tests/test_screen_owned_settings.py` checks the entities on every board, `SETTING_ENTITIES`, the editor
+  rows against the rows of `settings_screen.h` and the add-on's calls; `tests/test_settings_view.py` and
+  `tests/test_layout.py` cover the rest of the add-on side. The duration ladder and the -/+ steps are run on both
+  sides over the same edges (`web/tests/settings.spec.ts`, `tests/test_settings_screen.cpp`), and
+  `web/wasm/test_settings_tile.mjs` taps the settings card with the link down in the firmware preview.
+- `tools/render/run.py guition --only standby` runs Wake, Sleep, Auto standby, Back to page 1 and a setting the
+  screen changes itself on the real firmware (a host build), and reads its clocks, pages and entities back.
 - Look at it before believing it: `tools/render/run.py <board>` builds the real firmware of a board as a program
   for this computer (`tools/render/host.py`, SDL2) and drives it over its API (docs/TESTING.md). It renders the
   tile pages, the cards and the alerts, not the settings pages, so walk every settings page on a screen as well,
@@ -247,7 +269,7 @@ it in three places at once:
 
 - **Home Assistant**, as every entity of the screen's device;
 - **the screen**, on its settings page under **Extras**, a page that only a screen with such a setting has;
-- **the editor**, under Screen settings in an **Extras** card.
+- **the editor**, in the screen's Settings tab under This board, in an **Extras** card.
 
 All three show and change the same entity, so there is no second copy of the value to keep in step.
 
@@ -255,12 +277,12 @@ What the boards have today:
 
 | Board | Extras | Where it comes from |
 |---|---|---|
-| reTerminal D1001 | Volume, Microphone, Wake when moved | `features/audio.yaml`, and the board file for its motion sensor |
+| reTerminal D1001 | Volume, Microphone, Call ringtone, Do not disturb, Call voice switching, Wake when moved | `features/audio.yaml`, and the board file for its motion sensor |
 | Guition 4-inch (4848S040) | Backlight PWM, Dimmest level | the board file: its backlight's PWM (150 Hz dims every batch, some whine under 20 kHz, GitHub #327) and the floor it dims to (1 % is under some drivers' start, GitHub #337) |
-| Waveshare ESP32-P4 86 panel, ESP32-P4-WIFI6-Touch-LCD-7B, -7 and -10.1 | Volume, Microphone, Microphone gain, Automatic gain, Echo cancellation (AEC transport) | `hardware/wavesharep4-audio.yaml` (its parts in `hardware/parts/`) and the shared audio player |
-| M5Stack Tab5 | Volume, Microphone, Echo cancellation (AEC transport) | `hardware/parts/es7210.yaml` and `es8388.yaml` and the shared audio player |
-| CrowPanel Advanced 10.1 | Volume, Microphone | `features/audio.yaml` |
-| Guition JC8012P4A1 (and its V2 and V3), JC1060P470 (and its V2), JC4880P443 | Volume, Microphone | `hardware/guition-p4-audio.yaml` and `features/audio.yaml` |
+| Waveshare ESP32-P4 86 panel, ESP32-P4-WIFI6-Touch-LCD-7B, -7 and -10.1 | Volume, Microphone, Call ringtone, Do not disturb, Call voice switching, Microphone gain, Automatic gain, Echo cancellation (AEC transport) | `hardware/wavesharep4-audio.yaml` (its parts in `hardware/parts/`) and the shared audio player |
+| M5Stack Tab5 | Volume, Microphone, Call ringtone, Do not disturb, Call voice switching, Echo cancellation (AEC transport) | `hardware/parts/es7210.yaml` and `es8388.yaml` and the shared audio player |
+| CrowPanel Advanced 10.1 | Volume, Microphone, Call ringtone, Do not disturb, Call voice switching | `features/audio.yaml` |
+| Guition JC8012P4A1 (and its V2 and V3), JC1060P470 (and its V2), JC4880P443 | Volume, Microphone, Call ringtone, Do not disturb, Call voice switching | `hardware/guition-p4-audio.yaml` and `features/audio.yaml` |
 
 A plugin's settings work the same way, from its own ESPHome entities, on its own settings page and in its details on
 the screen's Plugins tab (docs/PLUGINS.md); the code that finds and changes them is one module for both.

@@ -476,6 +476,10 @@ describe("saving while you keep editing (app 0.2.78)", () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
     expect(body.layout.pages[0].tiles.map((t: any) => t.content.entityId)).toEqual(["light.a", "sensor.t", "light.b"]);
     expect(body.layout.pages[0].tiles[0].appearance.background).toBeUndefined();
+    // The save sends the page document alone: a screen's settings have a call of their own.
+    expect(body.format).toBe("pages-v2");
+    expect("settings" in body).toBe(false);
+    expect("settings" in body.layout).toBe(false);
   });
   it("leaves the unsaved flag of a screen opened meanwhile alone", async () => {
     useSessionStore().select("living");
@@ -735,6 +739,12 @@ describe("the mockup of a screen, whichever way it hangs", () => {
     expect(px(canvas.deviceStyle)).toBe(640);
     canvas.room = { width: 200, height: 200 };
     expect(px(canvas.deviceStyle)).toBe(480);
+    // A narrow page that is not a phone's (the full editor on a phone) is a ceiling: the glass never stands wider than
+    // the page, where it made an iPhone's Home Assistant app draw the whole editor smaller.
+    canvas.room = { width: 361, height: 600, cap: true };
+    expect(px(canvas.deviceStyle)).toBe(361);
+    canvas.room = { width: 900, height: 200, cap: true };
+    expect(px(canvas.deviceStyle)).toBe(Math.round((800 / 149) * 96 * 1.6 * 10) / 10);
     // The zoom takes the size from there, in a browser's steps, between 50 and 200 %.
     canvas.room = null;
     canvas.zoom = 1;

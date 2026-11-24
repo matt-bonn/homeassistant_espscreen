@@ -10,13 +10,14 @@ import { whenBarFontsLoad } from "../model/topbar";
 import { flagSerializer, usePreference } from "../composables/usePreference";
 import { showText } from "../composables/useConfirm";
 import { atMost, useAtMost } from "../composables/useWidths";
-import { overrideRoute, reportRoute, router } from "../router";
+import { iconsRoute, overrideRoute, reportRoute, router } from "../router";
+import { APP_SETTINGS_PARTS, SCREEN_SETTINGS_PARTS, type AppSettingsPart, type ScreenSettingsPart } from "../model/settings-parts";
 
 // ---- Routes: the pages of the app as the code names them, "" for the main view (the open screen, else the overview) ----
 // The address itself is the router's (router.ts: #/settings, #/screens/<id>, ...); these names stay for every caller.
-export const routes = ["", "#settings", "#new-screen", "#firmware", "#events", "#override", "#plugins", "#report"] as const;
+export const routes = ["", "#settings", "#new-screen", "#firmware", "#events", "#override", "#plugins", "#report", "#icons"] as const;
 /** The parts of Events (#/events/<kind>): what an automation fires at the screens. */
-export const eventKinds = ["alerts", "doorbell"] as const;
+export const eventKinds = ["alerts", "doorbell", "alarm", "calls"] as const;
 export type EventKind = (typeof eventKinds)[number];
 export type Route = (typeof routes)[number];
 export type Toast = { message: string; action?: { label: string; run: () => void } };
@@ -101,6 +102,8 @@ export const useUiStore = defineStore("ui", () => {
   const pagesSheet = ref(false);
   const previewOpen = ref(false);
   const pageWizardOpen = ref(false);
+  // The first layout's dialog (components/AutoLayoutDialog.vue, docs/AUTO_LAYOUT.md).
+  const autoLayoutOpen = ref(false);
 
   // ---- The phone (app 0.4.40) ----
   // A page as narrow as a phone gets the editor of everyday changes: the screen itself, one button to add a tile, a tile's
@@ -129,18 +132,69 @@ export const useUiStore = defineStore("ui", () => {
   // this store needs no screen store (which needs this one).
   let mainView: () => RouteLocationRaw = () => "/";
   function setMainView(view: () => RouteLocationRaw) { mainView = view; }
-  function go(target: Route) {
-    return router.push(target === "" ? mainView() : `/${target.slice(1)}`);
+  // `replace`: in place of the entry the browser has (Layoutbot's Yes on its way through other screens), so Back goes where
+  // the person was before, never to a screen only passed through.
+  function go(target: Route, { replace = false } = {}) {
+    const to = target === "" ? withChat(mainView()) : `/${target.slice(1)}`;
+    return replace ? router.replace(to) : router.push(to);
+  }
+  // Layoutbot's chat (docs/LAYOUTBOT.md): open while the address says so, `#/screens/<id>?chat=layoutbot`, so Back closes
+  // it and a reload opens it again. It stays open while the main view moves to another screen (go(""), as its Yes does on
+  // its way through the screens and home again), and closes with the screen (the overview, a page of the app).
+  const chatOpen = computed(() => current.value.name === "screen" && current.value.query.chat === "layoutbot");
+  // The part of the Settings tab stays too while the main view is the screen the address already has (a reload, a link
+  // to a part opening its screen), and goes with any other.
+  function withChat(view: RouteLocationRaw): RouteLocationRaw {
+    if (typeof view !== "object" || !("name" in view) || view.name !== "screen") return view;
+    const here = current.value;
+    const part = here.name === "screen" && view.params?.id === here.params.id ? here.query.settings : undefined;
+    const query = { ...(chatOpen.value ? { chat: "layoutbot" } : {}), ...(typeof part === "string" ? { settings: part } : {}) };
+    return Object.keys(query).length ? { ...view, query } : view;
+  }
+  function openChat(open: boolean) {
+    const here = current.value;
+    if (open === chatOpen.value || here.name !== "screen") return;
+    const { chat: _, ...query } = here.query;
+    if (open) return router.push({ name: "screen", params: here.params, query: { ...query, chat: "layoutbot" } });
+    // Closed the way it was opened where it can be (Back, the history the address bar walks), else in place.
+    const back = (window.history.state as { back?: string | null } | null)?.back;
+    const without = router.resolve({ name: "screen", params: here.params, query }).fullPath;
+    return back === without ? router.back() : router.replace({ name: "screen", params: here.params, query });
   }
   // The screen whose Override YAML is open (#/override/<profile>): the profile is in the address, so a reload keeps it.
   const overrideProfile = computed(() => current.value.name === "override" ? (String(current.value.params.profile || "") || null) : null);
   function openOverride(profile: string | null) { return router.push(overrideRoute(profile)); }
   // The part of Events that is open (#/events/<kind>): the alerts unless the address names another.
-  const eventsKind = computed<EventKind>(() => current.value.name === "events" && current.value.params.kind === "doorbell" ? "doorbell" : "alerts");
+  const eventsKind = computed<EventKind>(() => {
+    const kind = current.value.name === "events" ? current.value.params.kind : undefined;
+    return (eventKinds as readonly unknown[]).includes(kind) ? (kind as EventKind) : "alerts";
+  });
   function openEvents(kind: EventKind) { return router.push({ name: "events", params: { kind } }); }
+  // The part of Settings that is open (#/settings/<part>), or null for the list of its parts.
+  const settingsPart = computed<AppSettingsPart | null>(() => {
+    const part = current.value.name === "settings" ? current.value.params.part : undefined;
+    return (APP_SETTINGS_PARTS as readonly unknown[]).includes(part) ? (part as AppSettingsPart) : null;
+  });
+  function openSettings(part: AppSettingsPart | null) { return router.push(part ? `/settings/${part}` : "/settings"); }
+  // The part of the open screen's Settings tab (`?settings=<part>` on its address), or null for the list of its parts.
+  // Like the chat, it goes with the screen: another screen, or the overview, opens without it.
+  const screenSettingsPart = computed<ScreenSettingsPart | null>(() => {
+    const part = current.value.name === "screen" ? current.value.query.settings : undefined;
+    return (SCREEN_SETTINGS_PARTS as readonly unknown[]).includes(part) ? (part as ScreenSettingsPart) : null;
+  });
+  function openScreenSettings(part: ScreenSettingsPart | null, { replace = false } = {}) {
+    const here = current.value;
+    if (here.name !== "screen" || part === screenSettingsPart.value) return Promise.resolve();
+    const { settings: _, ...query } = here.query;
+    const to = { name: "screen", params: here.params, query: part ? { ...query, settings: part } : query };
+    return replace ? router.replace(to) : router.push(to);
+  }
   // The screen whose troubleshooting report is open (#/screens/<id>/report, components/ReportPanel.vue).
   const reportScreen = computed(() => current.value.name === "report" ? (String(current.value.params.id || "") || null) : null);
   function openReport(id: string) { return router.push(reportRoute(id)); }
+  // The screen whose icons are open (#/screens/<id>/icons, components/ScreenIconsPanel.vue).
+  const iconsScreen = computed(() => current.value.name === "icons" ? (String(current.value.params.id || "") || null) : null);
+  function openIcons(id: string) { return router.push(iconsRoute(id)); }
 
   // ---- The library drawer along the bottom (app 0.4.32): open or folded, remembered in this browser, and its filters ----
   const libraryOpen = usePreference("esp-screens.library-open", true, { serializer: { read: (raw) => raw !== "0", write: (open) => (open ? "1" : "0") } });
@@ -154,6 +208,9 @@ export const useUiStore = defineStore("ui", () => {
   // remembered in this browser: "Don't show this again" leaves the richer default and only the tip goes.
   const growTip = ref<{ tileId: string; before: string; size: string; applied: string | null } | null>(null);
   const growTips = usePreference("esp-screens.grow-tips", true, { serializer: flagSerializer });
+  // The tip beside a sensor just added as a meter (LookTip): its other looks, each drawn on the tile as the pointer rests.
+  const lookTip = ref<{ tileId: string } | null>(null);
+  const lookTips = usePreference("esp-screens.look-tips", true, { serializer: flagSerializer });
 
   // ---- The editor's clock and the top bar's fonts ----
   // The time the mockup's clocks and "last changed" lines read: the store's start ticks it (composables/useClock.ts).
@@ -180,10 +237,10 @@ export const useUiStore = defineStore("ui", () => {
 
   return {
     notice, toast, dismissToast, copyText, openIntegrations,
-    tab, menuOpen, palette, addSheet, pagesSheet, previewOpen, pageWizardOpen,
+    tab, menuOpen, palette, addSheet, pagesSheet, previewOpen, pageWizardOpen, autoLayoutOpen,
     narrowPhone, fullEditor, phone, setFullEditor, sideOpen,
-    route, go, setMainView, overrideProfile, openOverride, reportScreen, openReport, eventsKind, openEvents,
-    libraryOpen, filter, search, room, hidePlaced, growTip, growTips,
+    route, go, setMainView, chatOpen, openChat, settingsPart, openSettings, screenSettingsPart, openScreenSettings, overrideProfile, openOverride, reportScreen, openReport, iconsScreen, openIcons, eventsKind, openEvents,
+    libraryOpen, filter, search, room, hidePlaced, growTip, growTips, lookTip, lookTips,
     now, fontsVersion, start,
   };
 });

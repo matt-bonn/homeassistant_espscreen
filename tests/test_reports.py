@@ -13,7 +13,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'screen_manager/app'))
-sys.path.insert(0, str(ROOT / 'tests'))
 import redaction  # noqa: E402
 import reports  # noqa: E402
 
@@ -61,10 +60,16 @@ class FakeScreenApi:
         switch = SwitchInfo()
         switch.object_id, switch.key = 'debug_mode', 7
         other = types.SimpleNamespace(object_id='dark_mode', key=3)
-        return ([other, switch] if self.with_switch else [other]), []
+        SensorInfo = type('SensorInfo', (), {})
+        heap, never = SensorInfo(), SensorInfo()
+        heap.object_id, heap.key, heap.name = 'heap_free', 9, 'Heap Free'
+        never.object_id, never.key, never.name = 'psram_largest_block', 10, 'Psram Largest Block'
+        return ([other, switch] if self.with_switch else [other]) + [heap, never], []
 
     def subscribe_states(self, on_state):
         on_state(types.SimpleNamespace(key=3, state=True))
+        on_state(types.SimpleNamespace(key=9, state=236132.0, missing_state=False))
+        on_state(types.SimpleNamespace(key=10, state=0.0, missing_state=True))
         on_state(types.SimpleNamespace(key=7, state=self.debug))
 
     def switch_command(self, key, state):
@@ -97,13 +102,20 @@ class DebugModeForTheLog(unittest.IsolatedAsyncioTestCase):
         saved = sys.modules.get('aioesphomeapi')
         sys.modules['aioesphomeapi'] = fake
         try:
-            lines, _ = await reports.screen_log('screen.local', None, 0.05, debug=True)
+            self.readings = {}
+            lines, _ = await reports.screen_log('screen.local', None, 0.05, debug=True, readings=self.readings)
         finally:
             if saved is None:
                 del sys.modules['aioesphomeapi']
             else:
                 sys.modules['aioesphomeapi'] = saved
         return lines, made[0]
+
+    async def test_the_screen_s_own_figures_are_read_with_or_without_the_switch(self):
+        # The measuring sensors are off in Home Assistant unless someone wants them (debug_sensors.py).
+        for screen in ({}, {'with_switch': False}, {'debug': True}):
+            await self.read(**screen)
+            self.assertEqual(self.readings, {'heap free': '236132.0'})
 
     async def test_debug_mode_is_on_for_the_read_and_off_after_it(self):
         lines, api = await self.read()
@@ -314,14 +326,16 @@ class DeviceSensors(unittest.TestCase):
         registry = [{'entity_id': 'sensor.a_heap_free', 'original_name': 'Heap Free', 'device_id': 'a'},
                     {'entity_id': 'text_sensor.a_wifi_co_processor', 'original_name': 'Wi-Fi co-processor', 'device_id': 'a'},
                     {'entity_id': 'text_sensor.b_wifi_co_processor', 'original_name': 'Wi-Fi co-processor', 'device_id': 'b'},
+                    {'entity_id': 'sensor.a_loop_stack_free', 'original_name': 'Loop Stack Free', 'device_id': 'a'},
                     {'entity_id': 'sensor.a_other', 'original_name': 'Something else', 'device_id': 'a'}]
-        states = {'sensor.a_heap_free': {'state': '236132.0'},
+        states = {'sensor.a_heap_free': {'state': '236132.0'}, 'sensor.a_loop_stack_free': {'state': '152.0'},
                   'text_sensor.a_wifi_co_processor': {'state': 'ESP-Hosted 2.3.2 (host 2.12.12)'},
                   'text_sensor.b_wifi_co_processor': {'state': 'ESP-Hosted 2.12.12 (host 2.12.12)'}}
         service = reports.Reports.__new__(reports.Reports)
         service.manager = types.SimpleNamespace(ha=types.SimpleNamespace(registry=registry, states=states))
         self.assertEqual(service._device_sensors({'device_id': 'a'}),
-                         {'heap free': '236132.0', 'wi-fi co-processor': 'ESP-Hosted 2.3.2 (host 2.12.12)'})
+                         {'heap free': '236132.0', 'wi-fi co-processor': 'ESP-Hosted 2.3.2 (host 2.12.12)',
+                          'loop stack free': '152.0'})
 
 
 class TheRoute(unittest.IsolatedAsyncioTestCase):

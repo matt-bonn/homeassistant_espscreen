@@ -12,6 +12,7 @@ import { t } from "../i18n";
 import { entriesOf } from "../model/layout";
 import PhonePages from "./PhonePages.vue";
 import PageWizard from "./PageWizard.vue";
+import AutoLayoutDialog from "./AutoLayoutDialog.vue";
 import DevicePage from "./DevicePage.vue";
 import Library from "./Library.vue";
 import PageMap from "./PageMap.vue";
@@ -31,6 +32,8 @@ import { useDocumentStore } from "../stores/document";
 import { useInspectorStore } from "../stores/inspector";
 import { useDraftsStore } from "../stores/drafts";
 import GrowTip from "./GrowTip.vue";
+import LookTip from "./LookTip.vue";
+import LayoutBot from "./LayoutBot.vue";
 
 const ui = useUiStore();
 const builds = useBuildsStore();
@@ -82,9 +85,10 @@ const { band } = useBandSelect(canvasView);
 const canvasSize = useElementSize(canvasView);
 watchEffect(() => {
   const width = canvasSize.width.value, height = canvasSize.height.value;
-  // A phone fills its width with the page (stores/canvas.ts); a narrow page that is not a phone keeps the sizes above.
-  canvas.room = width <= 0 || height <= 0 || (narrow.value && !ui.phone) ? null
-    : ui.phone ? { width, height } : { width: width - 10, height: height - 110 };
+  // A phone fills its width with the page (stores/canvas.ts).
+  // A narrow page that is not a phone keeps the sizes above, but never wider than the page (the full editor on a phone).
+  canvas.room = width <= 0 || height <= 0 ? null
+    : ui.phone ? { width, height } : narrow.value ? { width, height, cap: true } : { width: width - 10, height: height - 110 };
 });
 onBeforeUnmount(() => { canvas.room = null; });
 const zoomPercent = computed(() => `${Math.round(canvas.zoom * 100)}%`);
@@ -109,6 +113,11 @@ const pages = computed(() => pageCount(entries.value, layout.value.pages));
 const shown = computed(() => pagesShown());
 const canAdd = computed(() => pages.value < grid.pages);
 const focused = computed(() => doc.document?.pages.findIndex((page) => page.id === doc.focusedPageId) ?? -1);
+// A screen without a single tile (a new one) is offered a first layout at once (docs/AUTO_LAYOUT.md); Start empty puts
+// the offer away for that screen while the editor is open.
+const offerSkipped = ref(new Set<string>());
+const offerFirst = computed(() => !layout.value.tiles.length && Boolean(scr.selected) && !offerSkipped.value.has(scr.selected!));
+const skipOffer = () => { offerSkipped.value = new Set([...offerSkipped.value, scr.selected!]); };
 const positionsHint = computed(() => hasGaps(layout.value.tiles) && !scr.supports(0, 2, 26)
   ? t("editor.layout.positions_hint", { firmware: scr.currentScreen?.firmware || t("editor.common.unknown") })
   : "");
@@ -147,6 +156,7 @@ function onCanvasClick(e: MouseEvent) {
         <button type="button" id="redo" class="icon-btn" :disabled="!doc.redoCount" :aria-label="redoText" :title="`${redoText} · ⇧⌘Z`" @click="doc.redo"><Icon name="redo" /></button>
       </div>
       <button type="button" class="btn quiet" :title="t('editor.pages.try_navigation')" @click="ui.previewOpen = true"><Icon name="play" />{{ t('editor.pages.preview') }}</button>
+      <button type="button" id="toolbar-auto-layout" class="btn quiet" :title="t('editor.auto.button_title')" @click="ui.autoLayoutOpen = true"><Icon name="auto-fix" />{{ t('editor.auto.button') }}</button>
       <button type="button" id="toolbar-add-page" class="btn quiet" :disabled="!canAdd" :title="canAdd ? '' : t('editor.layout.max_pages', grid.pages)" @click="ui.pageWizardOpen = true"><Icon name="plus" />{{ t('editor.layout.add_page') }}</button>
       <span class="spacer"></span>
       <span id="count" class="toolbar-count">{{ t("editor.layout.count", { tiles: layout.tiles.length, limit: doc.tileLimit }, pages) }}</span>
@@ -205,7 +215,14 @@ function onCanvasClick(e: MouseEvent) {
     <div v-if="doc.gridChanged" class="notice warn" role="status"><Icon name="resize" /><span class="notice-text">{{ t('editor.pages.grid_changed') }}</span><button class="btn quiet mini" @click="doc.reviewScreenGrid">{{ t('editor.pages.grid_review') }}</button></div>
     <div v-if="positionsHint" id="positions-hint" class="notice warn" role="status"><Icon name="alert-circle-outline" /><span class="notice-text">{{ positionsHint }}</span></div>
     <div v-if="reachHint" id="page-reach-hint" class="notice warn" role="status"><Icon name="alert-circle-outline" /><span class="notice-text">{{ reachHint }}</span></div>
-    <div v-if="!layout.tiles.length" id="no-tiles" class="notice" role="status"><Icon name="plus" /><span class="notice-text">{{ t("editor.layout.no_tiles") }}</span></div>
+    <!-- A new screen: the first layout offered at once (docs/AUTO_LAYOUT.md). -->
+    <div v-if="offerFirst" id="auto-layout-offer" class="notice choice offer" role="status">
+      <span class="offer-mark"><Icon name="auto-fix" /></span>
+      <span class="notice-text"><strong>{{ t('editor.auto.offer_title') }}</strong>{{ t('editor.auto.offer_text') }}</span>
+      <button type="button" id="auto-layout-skip" class="btn quiet mini" @click="skipOffer">{{ t('editor.auto.offer_empty') }}</button>
+      <button type="button" id="auto-layout-start" class="btn primary mini" @click="ui.autoLayoutOpen = true"><Icon name="auto-fix" />{{ t('editor.auto.offer_make') }}</button>
+    </div>
+    <div v-else-if="!layout.tiles.length" id="no-tiles" class="notice" role="status"><Icon name="plus" /><span class="notice-text">{{ t("editor.layout.no_tiles") }}</span></div>
     <template v-if="mode === 'advanced' && focused >= 0">
       <button type="button" class="btn quiet back-map" @click="doc.focusedPageId = null"><Icon name="arrow-left" />{{ t('editor.pages.back_map') }}</button>
       <div class="pages focused-page"><DevicePage :page="focused" :entries="entries" :pages="pages" :moving="dragging.moving" map /></div>
@@ -235,8 +252,9 @@ function onCanvasClick(e: MouseEvent) {
         </div>
       </div>
     </div>
-    <!-- The size of the pages (stores/canvas.ts zoom): out of the toolbar, in the corner, as on a map. -->
-    <div v-if="!ui.phone && mode === 'simple'" class="zoom-dock"><div class="zoom-pill" role="group" :aria-label="t('editor.pages.zoom')">
+    <!-- The size of the pages (stores/canvas.ts zoom): out of the toolbar, in the corner, as on a map. Not on a narrow page,
+         where the glass already takes the page's width. -->
+    <div v-if="!narrow && mode === 'simple'" class="zoom-dock"><div class="zoom-pill" role="group" :aria-label="t('editor.pages.zoom')">
       <button type="button" class="icon-btn" id="zoom-out" :aria-label="t('editor.pages.zoom_out')" :disabled="canvas.zoom <= 0.5" @click="canvas.zoomBy(-1)"><Icon name="magnify-minus-outline" /></button>
       <button type="button" class="zoom-value" id="zoom-reset" :title="t('editor.pages.zoom_reset')" @click="canvas.zoom = 1">{{ zoomPercent }}</button>
       <button type="button" class="icon-btn" id="zoom-in" :aria-label="t('editor.pages.zoom_in')" :disabled="canvas.zoom >= 2" @click="canvas.zoomBy(1)"><Icon name="magnify-plus-outline" /></button>
@@ -246,13 +264,18 @@ function onCanvasClick(e: MouseEvent) {
   <Teleport to="body"><div v-if="band" class="select-band" :style="{ left: `${band.left}px`, top: `${band.top}px`, width: `${band.width}px`, height: `${band.height}px` }"></div></Teleport>
   <Library v-if="doc.layout" />
   <GrowTip v-if="!ui.previewOpen" />
+  <LookTip v-if="!ui.previewOpen" />
+  <!-- Layoutbot (docs/LAYOUTBOT.md): on every page width; on a phone its key stands in the dock (ScreenView.vue). -->
+  <LayoutBot v-if="doc.layout && !ui.previewOpen" />
   <NavigationPreview v-if="ui.previewOpen && doc.document" :key="scr.selected || ''" @close="ui.previewOpen = false" />
+  <AutoLayoutDialog v-if="ui.autoLayoutOpen && doc.document" :key="scr.selected || ''" @close="ui.autoLayoutOpen = false" />
   <PageWizard v-if="ui.pageWizardOpen" :key="scr.selected || ''" @close="ui.pageWizardOpen = false" />
   <PhonePages v-if="ui.phone && ui.pagesSheet && doc.document" @add="ui.pagesSheet = false; ui.pageWizardOpen = true" />
   <GridReview v-if="doc.gridReview" />
 </template>
 
 <style scoped>
+.offer .offer-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); flex: none; }
 .select-band { position: fixed; z-index: 40; pointer-events: none; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 3px; }
 .focused-page { padding: 18px 0; justify-content: center; }
 .back-map { align-self: flex-start; }

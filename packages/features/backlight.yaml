@@ -35,7 +35,8 @@ script:
       level: int
       ms: int
     then:
-      - lambda: id(back_light).turn_on().set_transition_length(ms).set_brightness(level / 100.0f).perform();
+      - lambda: |-
+          id(back_light).turn_on().set_transition_length(ms).set_brightness(level / 100.0f).perform();
 
   - id: wake_display
     mode: restart
@@ -47,11 +48,12 @@ script:
           id(last_touch_ms) = millis();
           id(display_dimmed) = false;
           id(sleep_requested) = false;
-          // A short fade in, 200 ms. ESPHome's default is 1s, and that feels sluggish
-          // when you touch the screen and are waiting on light.
-          id(set_backlight).execute(screen_settings::current.brightness, 200);
           // The screensaver goes with the standby, and the touch that woke the screen does nothing else (0.29.0+).
+          // From a screensaver the light is up at once: a finger on it must see that it was heard, and the page comes
+          // in sight under that light. From the dark it fades in over 200 ms (ESPHome's default of 1 s felt sluggish).
+          const bool from_saver = runtime_tiles::saver_on();
           runtime_tiles::saver_wake();
+          id(set_backlight).execute(screen_settings::current.brightness, from_saver ? 0 : 200);
       - lvgl.widget.hide: dim_wake_overlay
       - script.execute: close_cards
 
@@ -68,7 +70,7 @@ script:
                 id(last_touch_ms) = millis();
                 runtime_tiles::alert_clear();
                 ESP_LOGI("alert", "dismissed: %s", reason.c_str());
-            - lvgl.widget.hide: alert_overlay
+            - lambda: 'screen_motion::hide(id(alert_overlay), id(alert_card));'
             - script.stop: alert_timeout
             - script.stop: alert_flash
             - lambda: 'id(set_backlight).execute(screen_settings::current.brightness, 80);'
