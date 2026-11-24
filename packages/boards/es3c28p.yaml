@@ -37,13 +37,14 @@ substitutions:
   # Backlight Pin (PWM)
   BACKLIGHT_PIN: GPIO45
 
-  # I2S & ES8311 Audio Pins (direkter I2S-Transport ohne AEC)
+ 
+  # I2S & ES8311 Audio Pins für LCDWIKI ES3C28P
   AUDIO_I2C: touch_bus
-  AUDIO_MCLK_PIN: GPIO6
-  AUDIO_BCLK_PIN: GPIO4
-  AUDIO_LRCLK_PIN: GPIO5
+  AUDIO_MCLK_PIN: GPIO4
+  AUDIO_BCLK_PIN: GPIO5
+  AUDIO_LRCLK_PIN: GPIO7
   AUDIO_DOUT_PIN: GPIO8
-  AUDIO_DIN_PIN: GPIO7
+  AUDIO_DIN_PIN: GPIO6
   AUDIO_TRANSPORT: "i2s"
 
 # ============================================================
@@ -63,8 +64,8 @@ wifi:
 # Geteilter I2C Bus fuer Touch (FT6336G, 0x38) & Audio-Codec (ES8311, 0x18)
 i2c:
   - id: touch_bus
-    sda: GPIO15
-    scl: GPIO16
+    sda: GPIO16
+    scl: GPIO15
     scan: true
     frequency: 400kHz
     
@@ -113,8 +114,18 @@ touchscreen:
     id: ts_touch
     i2c_id: touch_bus
     address: 0x38
+    interrupt_pin: GPIO17
     display: my_display
     update_interval: 20ms
+    calibration:
+      x_min: 0
+      x_max: 240
+      y_min: 0
+      y_max: 320
+    transform:
+      swap_xy: false
+      mirror_x: true
+      mirror_y: true
 
 
 # Status-LED (WS2812 RGB auf GPIO42)
