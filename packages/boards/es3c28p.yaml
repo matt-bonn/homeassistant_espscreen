@@ -113,10 +113,9 @@ touchscreen:
     id: ts_touch
     i2c_id: touch_bus
     address: 0x38
-    interrupt_pin: GPIO17
-    reset_pin: GPIO18
     display: my_display
     update_interval: 20ms
+
 
 # Status-LED (WS2812 RGB auf GPIO42)
 light:
