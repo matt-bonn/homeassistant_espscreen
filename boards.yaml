@@ -287,3 +287,11 @@ waveshare43c:
   status: experimental
   # The 4.3's glass with Waveshare's CH32V003 expander in place of the CH422G (website discussion 10): a 4.3C built
   # from the 4.3's board file starts with its touch chip in reset.
+
+es3c28p:
+  name: "LCDWIKI ES3C28P 2.8 inch"
+  vendor: "LCDWIKI"
+  chip: "ESP32-S3"
+  status: "experimental"
+  notes: "2.8-inch 240x320 IPS (ILI9341V), FT6336G capacitive touch, ES8311 audio codec, LiPo battery monitor."
+  # The Cheap Black Display with ESP32S3, 2.8' 240x320 IPS, battery monitor, speaker, mic, voice assist
